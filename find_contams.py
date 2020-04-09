@@ -10,16 +10,18 @@ def get_tables(profileDB, contigsDB, sample_name):
     cov_stds_file = f'{sample_name}_std_coverage_splits.txt'
     detect_file = f'{sample_name}_detection_splits.txt'
     taxonomy_file = f'{sample_name}_taxonomy_splits.txt'
+    splits_info_file = f'{sample_name}_splits_info.txt'
     mcov_cmd = f'anvi-export-table --table mean_coverage_Q2Q3_splits {profileDB} -o {cov_means_file}'
     scov_cmd = f'anvi-export-table --table std_coverage_splits {profileDB} -o {cov_stds_file}'
     dcov_cmd = f'anvi-export-table --table detection_splits {profileDB} -o {detect_file}'
     tax_cmd = f'anvi-export-splits-taxonomy -c {contigsDB} -o {taxonomy_file}'
-    all_cmd = [mcov_cmd, scov_cmd, dcov_cmd, tax_cmd]
+    info_cmd = f'anvi-export-table --table splits_basic_info {contigsDB} -o {splits_info_file}'
+    all_cmd = [mcov_cmd, scov_cmd, dcov_cmd, tax_cmd, info_cmd]
 
     for i in all_cmd:
         subprocess.run(shlex.split(i))
 
-    return(cov_means_file, cov_stds_file, detect_file, taxonomy_file)
+    return(cov_means_file, cov_stds_file, detect_file, taxonomy_file, splits_info_file)
 
 def import_table(anvio_file, sample_name):
     df = pd.read_csv(anvio_file, sep='\t')
@@ -85,7 +87,7 @@ def score_contigs_detection(detection, cov_contams):
     detect_posscontam_lt = detect_posscontam.lt(detect_posscontam.s - 0.05, axis=0)
     detect_posscontam_lt = detect_posscontam_lt.drop(columns = 's')
 
-    # Use detect_posscontam_lt as a mask
+    # Use detect_posscontam_lt as a mask, turns "True" contigs to NaN
     # remove any contigs that are 'True' for all controls
     # leaving scores for the remaining contigs
     final_contams = cov_contams[~detect_posscontam_lt]
@@ -97,6 +99,33 @@ def taxonomy_remove(tax_names, taxonomy_file):
     tax = pd.read_csv(taxonomy_file, sep = '\t', names=['split', 'genus'], index_col=0)
     tax_contam_splits = pd.DataFrame(tax[tax.genus.isin(tax_names)].index)
     return(tax_contam_splits)
+
+def write_report(collection, sample_name, cov_means, splits_info_file, out_prefix):
+    '''summarize contigs removed and write report'''
+    contam_splits = collection.split
+    # what % total coverage was removed?
+    # calculate relative coverage, subset contigs, sum % coverages
+    cov_means_s = cov_means[['s']]
+    cov_means_norm_s = cov_means_s.div(cov_means_s.sum(axis=0), axis=1) # relative coverage for all contigs
+    cov_means_norm_contams = cov_means_norm_s[cov_means_norm_s.index.isin(contam_splits)] # subset contam contigs
+    perc_cov = round ((cov_means_norm_contams.sum().values[0] * 100), 2) # sum of relative coverages of contams
+
+    ## what length, what % total length
+    # anvi-export-table --table splits_basic_info CONTIGS.db -o KNLK_46_splits_basic_info.txt
+    splits_info = pd.read_csv(splits_info_file, sep = '\t', usecols=['split', 'length'])
+    total_length = splits_info.length.sum()
+    splits_info_contams = splits_info[splits_info.split.isin(contam_splits)]
+    contams_length = splits_info_contams.length.sum()
+    perc_length_contam = round((100 * contams_length / total_length), 2)
+
+    # write report
+    report = pd.DataFrame.from_dict({'sample_name': [sample_name],
+                                     'perc_cov': [perc_cov],
+                                     'perc_length': [perc_length_contam],
+                                     'contams_length': [contams_length],
+                                     'total_length': [total_length],
+                                     'num_splits': [len(contam_splits)]})
+    report.to_csv(f'{out_prefix}_report.txt', sep='\t', index=False)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -119,7 +148,7 @@ def main():
     profileDB = args.profileDB
     contigsDB = args.contigsDB
 
-    cov_means_file, cov_stds_file, detect_file, taxonomy_file = get_tables(profileDB, contigsDB, sample_name)
+    cov_means_file, cov_stds_file, detect_file, taxonomy_file, splits_info_file = get_tables(profileDB, contigsDB, sample_name)
 
     cov_means = import_table(cov_means_file, sample_name)
     cov_stds = import_table(cov_stds_file, sample_name)
@@ -145,6 +174,8 @@ def main():
     #(with anvi-import-collection and anvi-split)
     collection['bin'] = 'contam'
     collection.to_csv(f'{out_prefix}_collection.txt', header=False, index=False, sep='\t')
+    write_report(collection, sample_name, cov_means, splits_info_file, out_prefix)
+
 
 if __name__ == '__main__':
     main()
