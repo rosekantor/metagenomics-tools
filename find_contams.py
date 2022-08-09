@@ -25,11 +25,15 @@ def get_tables(profileDB, contigsDB, sample_name):
 
 def import_table(anvio_file, sample_name):
     df = pd.read_csv(anvio_file, sep='\t')
-    df = df.rename(columns = {'contig': 'split', '__parent__' : 'contig', sample_name : 's'})
-    df = df.drop(columns = 'contig')
-    df = df.set_index('split')
+    df = df.rename(columns = {'item': 'split', 'layer' : 'samples'})
+    df = df.pivot(index='split', columns='samples', values='value')
+    if sample_name in df.columns:
+        df = df.rename(columns = {sample_name: 's'})
+    else:
+        raise RuntimeError('The sample of interest has not been profiled or has a different name than the one you provided.')
 
     return(df)
+
 
 def score_contigs_cov(cov_means, cov_stds):
     '''Check whether the contig mean coverage is greater in sample than control and
