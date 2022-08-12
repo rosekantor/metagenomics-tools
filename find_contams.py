@@ -104,9 +104,9 @@ def taxonomy_remove(tax_names, taxonomy_file):
     tax_contam_splits = pd.DataFrame(tax[tax.genus.isin(tax_names)].index)
     return(tax_contam_splits)
 
-def write_report(collection, sample_name, cov_means, splits_info_file, out_prefix):
+def write_report(contam_splits, sample_name, cov_means, splits_info_file, out_prefix):
     '''summarize contigs removed and write report'''
-    contam_splits = collection.split
+    #contam_splits = collection.split
     # what % total coverage was removed?
     # calculate relative coverage, subset contigs, sum % coverages
     cov_means_s = cov_means[['s']]
@@ -166,19 +166,24 @@ def main():
     # output table of scores to be imported as items for layers in anvio_file
     #(e.g. anvi-import-misc-data -p PROFILE.db -t items scores.txt)
     detect_contams.to_csv(f'{out_prefix}_scores.txt', index=True, sep='\t')
-    collection = pd.DataFrame(detect_contams.index)
+    contam_splits = set(detect_contams.index)
+    # collection = pd.DataFrame(detect_contams.index)
 
     if args.tax_names:
         tax_names = args.tax_names.split(',')
         tax_contam_splits = taxonomy_remove(tax_names, taxonomy_file)
         #combine contam_splits and collection, drop duplicate rows
-        collection = pd.concat([collection, tax_contam_splits]).drop_duplicates('split')
+        contam_splits.exted(tax_contam_splits)
+        contam_splits = set(contam_splits)
 
     # output table of contig names to be used as a collection and split the DB
     #(with anvi-import-collection and anvi-split)
-    collection['bin'] = 'contam'
+    collection = pd.DataFrame()
+    collection['split'] = cov_means.index
+    collection['bin'] = 'none'
+    collection.loc[collection.split.isin(contam_splits), 'bin'] = 'contam'
     collection.to_csv(f'{out_prefix}_collection.txt', header=False, index=False, sep='\t')
-    write_report(collection, sample_name, cov_means, splits_info_file, out_prefix)
+    write_report(contam_splits, sample_name, cov_means, splits_info_file, out_prefix)
 
 
 if __name__ == '__main__':
